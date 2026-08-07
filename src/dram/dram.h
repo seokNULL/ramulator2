@@ -129,9 +129,18 @@ class IDRAM : public Clocked<IDRAM> {
      * Provide a universal interface to let the host change the DRAM configurations on the fly (e.g., set refresh mode),
      * given that the host knows what it can configure with the DRAM. This is slow so should NOT be called too often
      * TODO: Alternatively, we can keep adding new functionalities to this DRAM interface...
-     * 
+     *
      */
     virtual void notify(std::string_view key, uint64_t value) {};
+
+    /**
+     * @brief     Returns the command ID of the CuD-ACT (CACT) command.
+     * @details
+     * Returns -1 if this DRAM type does not support CuD. Override in each DRAM
+     * implementation that adds a CACT command. CuDDRAMController checks this at
+     * setup time so it can operate device-agnostically.
+     */
+    virtual int get_cact_cmd_id() const { return -1; }
 
     /**
      * @brief     

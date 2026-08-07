@@ -37,6 +37,7 @@ class CuDDRAMController final : public IDRAMController, public Implementation {
     ReqBuffer m_cud_buffer;
 
     int m_bank_addr_idx = -1;
+    int m_cact_cmd_id   = -1;  // Command ID of CACT on the current DRAM device
 
     float m_wr_low_watermark;
     float m_wr_high_watermark;
@@ -141,6 +142,14 @@ class CuDDRAMController final : public IDRAMController, public Implementation {
       m_dram = memory_system->get_ifce<IDRAM>();
       m_logger = Logging::create_logger("CuDDRAMController[" + std::to_string(m_channel_id) + "]");
       m_bank_addr_idx = m_dram->m_levels("bank");
+
+      m_cact_cmd_id = m_dram->get_cact_cmd_id();
+      if (m_cact_cmd_id == -1) {
+        throw std::runtime_error(
+          "CuDDRAMController: DRAM type does not support CuD (no CACT command). "
+          "Add CACT to the DRAM implementation and override get_cact_cmd_id()."
+        );
+      }
       m_priority_buffer.max_size = 512*3 + 32;
 
       m_num_cores = frontend->get_num_cores();
@@ -539,7 +548,7 @@ class CuDDRAMController final : public IDRAMController, public Implementation {
     }
 
     void MangeCuDInst(Request& req) {
-        const int CACT = m_dram->m_commands("CACT");
+        const int CACT = m_cact_cmd_id;
         const int PRE  = m_dram->m_commands("PRE");
         const CuDInstDecoded d = CuDAddrDecoder::decode(req.cud_inst);
         const AddrVec_t& av   = req.addr_vec;
@@ -671,20 +680,9 @@ class CuDDRAMController final : public IDRAMController, public Implementation {
     }
 
   }
-  const char* get_command_name(int cmd_code) {
-    switch (cmd_code) {
-        case 0: return "ACT";
-        case 1: return "PRE";
-        case 2: return "PREA";
-        case 3: return "RD";
-        case 4: return "WR";
-        case 5: return "RDA";
-        case 6: return "WRA";
-        case 7: return "REFAB";
-        case 8: return "REFAB_END";
-        case 9: return "CACT";
-        default: return "UNKNOWN";
-    }
+  const char* get_command_name(int cmd_id) {
+    try { return m_dram->m_commands(cmd_id).data(); }
+    catch (...) { return "UNKNOWN"; }
   }
   const char* get_CuD_opcode_name (int cmd_code){
     switch (cmd_code)

@@ -275,6 +275,8 @@ class DDR4 : public IDRAM, public Implementation {
       return m_channels[channel_id]->check_node_open(command, addr_vec, m_clk);
     };
 
+    int get_cact_cmd_id() const override { return m_commands("CACT"); }
+
   private:
     void set_organization() {
       // Channel width

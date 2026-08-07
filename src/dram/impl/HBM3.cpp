@@ -35,11 +35,12 @@ class HBM3 : public IDRAM, public Implementation {
    *             Requests & Commands
    ***********************************************/
     inline static constexpr ImplDef m_commands = {
-      "ACT", 
+      "ACT",
       "PRE", "PREA",
       "RD",  "WR",  "RDA",  "WRA",
       "REFab", "REFsb",
-      "RFMab", "RFMsb"
+      "RFMab", "RFMsb",
+      "CACT"   // CuD ACT: row-open with relaxed ACT→ACT/PRE timing (nRCDRD instead of nRC/nRAS)
     };
 
     inline static const ImplLUT m_command_scopes = LUT (
@@ -49,6 +50,7 @@ class HBM3 : public IDRAM, public Implementation {
         {"RD",    "column"},  {"WR",     "column"}, {"RDA",   "column"}, {"WRA",   "column"},
         {"REFab", "channel"}, {"REFsb",  "bank"},
         {"RFMab", "channel"}, {"RFMsb",  "bank"},
+        {"CACT",  "row"},
       }
     );
 
@@ -66,6 +68,7 @@ class HBM3 : public IDRAM, public Implementation {
         {"REFsb", {false,  false,   false,   true }},
         {"RFMab", {false,  false,   false,   true }},
         {"RFMsb", {false,  false,   false,   true }},
+        {"CACT",  {true,   false,   false,   false}},
       }
     );
 
@@ -170,6 +173,8 @@ class HBM3 : public IDRAM, public Implementation {
       int channel_id = addr_vec[m_levels["channel"]];
       return m_channels[channel_id]->check_node_open(command, addr_vec, m_clk);
     };
+
+    int get_cact_cmd_id() const override { return m_commands("CACT"); }
 
   private:
     void set_organization() {
@@ -300,11 +305,12 @@ class HBM3 : public IDRAM, public Implementation {
       // Populate the timing constraints
       #define V(timing) (m_timing_vals(timing))
       populate_timingcons(this, {
-          /*** Channel ***/ 
-          /// 2-cycle ACT command (for row commands)
-          {.level = "channel", .preceding = {"ACT"}, .following = {"ACT", "PRE", "PREA", "REFab", "REFsb", "RFMab", "RFMsb"}, .latency = 2},
+          /*** Channel ***/
+          /// 2-cycle ACT/CACT command (for row commands)
+          {.level = "channel", .preceding = {"ACT"},  .following = {"ACT", "CACT", "PRE", "PREA", "REFab", "REFsb", "RFMab", "RFMsb"}, .latency = 2},
+          {.level = "channel", .preceding = {"CACT"}, .following = {"ACT", "CACT", "PRE", "PREA", "REFab", "REFsb", "RFMab", "RFMsb"}, .latency = 2},
 
-          /*** Pseudo Channel (Table 3 — Array Access Timings Counted Individually Per Pseudo Channel, JESD-235C) ***/ 
+          /*** Pseudo Channel (Table 3 — Array Access Timings Counted Individually Per Pseudo Channel, JESD-235C) ***/
           // RAS <-> RAS
           {.level = "pseudochannel", .preceding = {"ACT"}, .following = {"ACT"}, .latency = V("nRRDS")},
           /// 4-activation window restriction
@@ -323,51 +329,61 @@ class HBM3 : public IDRAM, public Implementation {
           {.level = "pseudochannel", .preceding = {"WR", "WRA"}, .following = {"WR", "WRA"}, .latency = V("nBL")},
 
           // CAS <-> CAS
-          /// nCCDS is the minimal latency for column commands 
+          /// nCCDS is the minimal latency for column commands
           {.level = "pseudochannel", .preceding = {"RD", "RDA"}, .following = {"RD", "RDA"}, .latency = V("nCCDS")},
           {.level = "pseudochannel", .preceding = {"WR", "WRA"}, .following = {"WR", "WRA"}, .latency = V("nCCDS")},
-          /// RD <-> WR, Minimum Read to Write, Assuming tWPRE = 1 tCK                          
+          /// RD <-> WR, Minimum Read to Write, Assuming tWPRE = 1 tCK
           {.level = "pseudochannel", .preceding = {"RD", "RDA"}, .following = {"WR", "WRA"}, .latency = V("nCL") + V("nBL") + 2 - V("nCWL")},
           /// WR <-> RD, Minimum Read after Write
           {.level = "pseudochannel", .preceding = {"WR", "WRA"}, .following = {"RD", "RDA"}, .latency = V("nCWL") + V("nBL") + V("nWTRS")},
           /// CAS <-> PREab
           {.level = "pseudochannel", .preceding = {"RD"}, .following = {"PREA"}, .latency = V("nRTPS")},
-          {.level = "pseudochannel", .preceding = {"WR"}, .following = {"PREA"}, .latency = V("nCWL") + V("nBL") + V("nWR")},          
+          {.level = "pseudochannel", .preceding = {"WR"}, .following = {"PREA"}, .latency = V("nCWL") + V("nBL") + V("nWR")},
           /// RAS <-> RAS
-          {.level = "pseudochannel", .preceding = {"ACT"}, .following = {"ACT"}, .latency = V("nRRDS")},          
-          {.level = "pseudochannel", .preceding = {"ACT"}, .following = {"ACT"}, .latency = V("nFAW"), .window = 4},          
-          {.level = "pseudochannel", .preceding = {"ACT"}, .following = {"PREA"}, .latency = V("nRAS")},          
-          {.level = "pseudochannel", .preceding = {"PREA"}, .following = {"ACT"}, .latency = V("nRP")},          
+          {.level = "pseudochannel", .preceding = {"ACT"},  .following = {"ACT", "CACT"}, .latency = V("nRRDS")},
+          {.level = "pseudochannel", .preceding = {"CACT"}, .following = {"ACT", "CACT"}, .latency = V("nRRDS")},
+          {.level = "pseudochannel", .preceding = {"ACT"},  .following = {"ACT"},          .latency = V("nFAW"), .window = 4},
+          {.level = "pseudochannel", .preceding = {"ACT"},  .following = {"PREA"},         .latency = V("nRAS")},
+          {.level = "pseudochannel", .preceding = {"CACT"}, .following = {"PREA"},         .latency = V("nRCDRD")},  // CuD: nRCDRD instead of nRAS
+          {.level = "pseudochannel", .preceding = {"PREA"}, .following = {"ACT", "CACT"},  .latency = V("nRP")},
           /// RAS <-> REF
-          {.level = "pseudochannel", .preceding = {"ACT"}, .following = {"REFab", "RFMab"}, .latency = V("nRC")},          
-          {.level = "pseudochannel", .preceding = {"PRE", "PREA"}, .following = {"REFab", "RFMab"}, .latency = V("nRP")},          
-          {.level = "pseudochannel", .preceding = {"RDA"}, .following = {"REFab", "RFMab"}, .latency = V("nRP") + V("nRTPS")},          
-          {.level = "pseudochannel", .preceding = {"WRA"}, .following = {"REFab", "RFMab"}, .latency = V("nCWL") + V("nBL") + V("nWR") + V("nRP")},          
-          {.level = "pseudochannel", .preceding = {"REFab", "RFMab"}, .following = {"ACT", "REFsb", "RFMsb"}, .latency = V("nRFC")},          
+          {.level = "pseudochannel", .preceding = {"ACT"},         .following = {"REFab", "RFMab"}, .latency = V("nRC")},
+          {.level = "pseudochannel", .preceding = {"CACT"},        .following = {"REFab", "RFMab"}, .latency = V("nRCDRD")},  // CuD: nRCDRD instead of nRC
+          {.level = "pseudochannel", .preceding = {"PRE", "PREA"}, .following = {"REFab", "RFMab"}, .latency = V("nRP")},
+          {.level = "pseudochannel", .preceding = {"RDA"},         .following = {"REFab", "RFMab"}, .latency = V("nRP") + V("nRTPS")},
+          {.level = "pseudochannel", .preceding = {"WRA"},         .following = {"REFab", "RFMab"}, .latency = V("nCWL") + V("nBL") + V("nWR") + V("nRP")},
+          {.level = "pseudochannel", .preceding = {"REFab", "RFMab"}, .following = {"ACT", "CACT", "REFsb", "RFMsb"}, .latency = V("nRFC")},
 
-          /*** Same Bank Group ***/ 
+          /*** Same Bank Group ***/
           /// CAS <-> CAS
-          {.level = "bankgroup", .preceding = {"RD", "RDA"}, .following = {"RD", "RDA"}, .latency = V("nCCDL")},          
-          {.level = "bankgroup", .preceding = {"WR", "WRA"}, .following = {"WR", "WRA"}, .latency = V("nCCDL")},          
+          {.level = "bankgroup", .preceding = {"RD", "RDA"}, .following = {"RD", "RDA"}, .latency = V("nCCDL")},
+          {.level = "bankgroup", .preceding = {"WR", "WRA"}, .following = {"WR", "WRA"}, .latency = V("nCCDL")},
           {.level = "bankgroup", .preceding = {"WR", "WRA"}, .following = {"RD", "RDA"}, .latency = V("nCWL") + V("nBL") + V("nWTRL")},
           /// RAS <-> RAS
-          {.level = "bankgroup", .preceding = {"ACT"}, .following = {"ACT"}, .latency = V("nRRDL")},  
-          {.level = "bankgroup", .preceding = {"ACT"}, .following = {"REFsb", "RFMsb"}, .latency = V("nRRDL") + 1},  
-          {.level = "bankgroup", .preceding = {"REFsb", "RFMsb"}, .following = {"ACT"}, .latency = V("nRRDL") - 1},  
+          {.level = "bankgroup", .preceding = {"ACT"},  .following = {"ACT", "CACT"},  .latency = V("nRRDL")},
+          {.level = "bankgroup", .preceding = {"CACT"}, .following = {"ACT", "CACT"},  .latency = V("nRRDL")},
+          {.level = "bankgroup", .preceding = {"ACT"},  .following = {"REFsb", "RFMsb"}, .latency = V("nRRDL") + 1},
+          {.level = "bankgroup", .preceding = {"REFsb", "RFMsb"}, .following = {"ACT"}, .latency = V("nRRDL") - 1},
 
-          {.level = "bank", .preceding = {"RD"},  .following = {"PRE"}, .latency = V("nRTPS")},  
+          {.level = "bank", .preceding = {"RD"}, .following = {"PRE"}, .latency = V("nRTPS")},
 
-
-          /*** Bank ***/ 
-          {.level = "bank", .preceding = {"ACT"}, .following = {"ACT"}, .latency = V("nRC")},  
-          {.level = "bank", .preceding = {"ACT"}, .following = {"RD", "RDA"}, .latency = V("nRCDRD")},  
-          {.level = "bank", .preceding = {"ACT"}, .following = {"WR", "WRA"}, .latency = V("nRCDWR")},  
-          {.level = "bank", .preceding = {"ACT"}, .following = {"PRE"}, .latency = V("nRAS")},  
-          {.level = "bank", .preceding = {"PRE"}, .following = {"ACT"}, .latency = V("nRP")},  
-          {.level = "bank", .preceding = {"RD"},  .following = {"PRE"}, .latency = V("nRTPL")},  
-          {.level = "bank", .preceding = {"WR"},  .following = {"PRE"}, .latency = V("nCWL") + V("nBL") + V("nWR")},  
-          {.level = "bank", .preceding = {"RDA"}, .following = {"ACT", "REFsb", "RFMsb"}, .latency = V("nRTPL") + V("nRP")},  
-          {.level = "bank", .preceding = {"WRA"}, .following = {"ACT", "REFsb", "RFMsb"}, .latency = V("nCWL") + V("nBL") + V("nWR") + V("nRP")},  
+          /*** Bank ***/
+          // Normal ACT timing
+          {.level = "bank", .preceding = {"ACT"}, .following = {"ACT", "CACT"},         .latency = V("nRC")},
+          {.level = "bank", .preceding = {"ACT"}, .following = {"RD", "RDA"},           .latency = V("nRCDRD")},
+          {.level = "bank", .preceding = {"ACT"}, .following = {"WR", "WRA"},           .latency = V("nRCDWR")},
+          {.level = "bank", .preceding = {"ACT"}, .following = {"PRE"},                 .latency = V("nRAS")},
+          {.level = "bank", .preceding = {"PRE"}, .following = {"ACT", "CACT"},         .latency = V("nRP")},
+          // CuD ACT (CACT) timing: uses nRCDRD instead of nRC/nRAS (HBM3 splits nRCD into read/write)
+          {.level = "bank", .preceding = {"CACT"}, .following = {"ACT", "CACT"},        .latency = V("nRCDRD")},
+          {.level = "bank", .preceding = {"CACT"}, .following = {"PRE"},                .latency = V("nRCDRD")},
+          {.level = "bank", .preceding = {"CACT"}, .following = {"RD", "RDA"},          .latency = V("nRCDRD")},
+          {.level = "bank", .preceding = {"CACT"}, .following = {"WR", "WRA"},          .latency = V("nRCDWR")},
+          // Column timing
+          {.level = "bank", .preceding = {"RD"},  .following = {"PRE"}, .latency = V("nRTPL")},
+          {.level = "bank", .preceding = {"WR"},  .following = {"PRE"}, .latency = V("nCWL") + V("nBL") + V("nWR")},
+          {.level = "bank", .preceding = {"RDA"}, .following = {"ACT", "CACT", "REFsb", "RFMsb"}, .latency = V("nRTPL") + V("nRP")},
+          {.level = "bank", .preceding = {"WRA"}, .following = {"ACT", "CACT", "REFsb", "RFMsb"}, .latency = V("nCWL") + V("nBL") + V("nWR") + V("nRP")},
         }
       );
       #undef V
@@ -381,10 +397,11 @@ class HBM3 : public IDRAM, public Implementation {
       m_actions[m_levels["channel"]][m_commands["PREA"]] = Lambdas::Action::Channel::PREab<HBM3>;
 
       // Bank actions
-      m_actions[m_levels["bank"]][m_commands["ACT"]] = Lambdas::Action::Bank::ACT<HBM3>;
-      m_actions[m_levels["bank"]][m_commands["PRE"]] = Lambdas::Action::Bank::PRE<HBM3>;
-      m_actions[m_levels["bank"]][m_commands["RDA"]] = Lambdas::Action::Bank::PRE<HBM3>;
-      m_actions[m_levels["bank"]][m_commands["WRA"]] = Lambdas::Action::Bank::PRE<HBM3>;
+      m_actions[m_levels["bank"]][m_commands["ACT"]]  = Lambdas::Action::Bank::ACT<HBM3>;
+      m_actions[m_levels["bank"]][m_commands["CACT"]] = Lambdas::Action::Bank::ACT<HBM3>;
+      m_actions[m_levels["bank"]][m_commands["PRE"]]  = Lambdas::Action::Bank::PRE<HBM3>;
+      m_actions[m_levels["bank"]][m_commands["RDA"]]  = Lambdas::Action::Bank::PRE<HBM3>;
+      m_actions[m_levels["bank"]][m_commands["WRA"]]  = Lambdas::Action::Bank::PRE<HBM3>;
     };
 
     void set_preqs() {
@@ -395,8 +412,9 @@ class HBM3 : public IDRAM, public Implementation {
 
       // Bank actions
       m_preqs[m_levels["bank"]][m_commands["REFsb"]] = Lambdas::Preq::Bank::RequireBankClosed<HBM3>;
-      m_preqs[m_levels["bank"]][m_commands["RD"]] = Lambdas::Preq::Bank::RequireRowOpen<HBM3>;
-      m_preqs[m_levels["bank"]][m_commands["WR"]] = Lambdas::Preq::Bank::RequireRowOpen<HBM3>;
+      m_preqs[m_levels["bank"]][m_commands["RD"]]    = Lambdas::Preq::Bank::RequireRowOpen<HBM3>;
+      m_preqs[m_levels["bank"]][m_commands["WR"]]    = Lambdas::Preq::Bank::RequireRowOpen<HBM3>;
+      m_preqs[m_levels["bank"]][m_commands["CACT"]]  = Lambdas::Preq::Bank::RequireRowOpen<HBM3>;
     };
 
     void set_rowhits() {
