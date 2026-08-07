@@ -13,6 +13,8 @@ using Clk_t     = int64_t;            // Clock cycle
 using Addr_t    = int64_t;            // Plain address as seen by the OS
 using AddrVec_t = std::vector<int>;   // Device address vector as is sent to the device from the controller
 
+using CuD_inst_t = int32_t;
+
 template<typename T>
 using Registry_t = std::unordered_map<std::string, T>;
 

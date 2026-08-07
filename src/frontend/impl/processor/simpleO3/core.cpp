@@ -9,6 +9,8 @@
 #include "frontend/impl/processor/simpleO3/core.h"
 #include "frontend/impl/processor/simpleO3/llc.h"
 
+
+
 namespace Ramulator {
 
 namespace fs = std::filesystem;
@@ -30,21 +32,26 @@ SimpleO3Core::Trace::Trace(std::string file_path_str) {
     tokenize(tokens, line, " ");
 
     int num_tokens = tokens.size();
-    if (num_tokens != 2 & num_tokens != 3) {
-      throw ConfigurationError("Trace {} format invalid!", file_path_str);
-    }
     int bubble_count = std::stoi(tokens[0]);
     Addr_t load_addr = std::stoll(tokens[1]);
 
-    bool has_store = num_tokens == 2 ? false : true; 
-    if (has_store) {
+    if(num_tokens != 2 & num_tokens !=3 & num_tokens !=4){
+      throw ConfigurationError("Trace {} format invailid", file_path_str);
+    }
+
+    if(num_tokens == 4){
+      // CuD_inst_t cud_inst = std::stoi(tokens[2], 0, 16);
+      CuD_inst_t cud_inst = std::stoul(tokens[2], 0, 16);
+      m_trace.push_back({bubble_count, -1, -1, true, cud_inst});
+    }
+    else if (num_tokens == 3) {
       Addr_t store_addr = std::stoll(tokens[2]);
-      m_trace.push_back({bubble_count, load_addr, store_addr});
-    } else {
-      m_trace.push_back({bubble_count, load_addr, -1});
+      m_trace.push_back({bubble_count, load_addr, store_addr, false, -1});
+    }
+    else if (num_tokens == 2) {
+      m_trace.push_back({bubble_count, load_addr, -1, false, -1});
     }
   }
-
   trace_file.close();
   m_trace_length = m_trace.size();
 }
@@ -52,6 +59,7 @@ SimpleO3Core::Trace::Trace(std::string file_path_str) {
 const SimpleO3Core::Trace::Inst& SimpleO3Core::Trace::get_next_inst() {
   const Inst& inst = m_trace[m_curr_trace_idx];
   m_curr_trace_idx = (m_curr_trace_idx + 1) % m_trace_length;
+  // m_curr_trace_idx = (m_curr_trace_idx + 1);
   return inst;
 }
 
@@ -102,17 +110,24 @@ void SimpleO3Core::InstWindow::set_ready(Addr_t addr) {
   }
 }
 
-SimpleO3Core::SimpleO3Core(int id, int ipc, int depth, size_t num_expected_insts, std::string trace_path, ITranslation* translation, SimpleO3LLC* llc):
-m_id(id), m_window(ipc, depth), m_trace(trace_path), m_num_expected_insts(num_expected_insts), m_translation(translation), m_llc(llc) {
+// SimpleO3Core::SimpleO3Core(int id, int ipc, int depth, size_t num_expected_insts, std::string trace_path, ITranslation* translation, SimpleO3LLC* llc):
+// m_id(id), m_window(ipc, depth), m_trace(trace_path), m_num_expected_insts(num_expected_insts), m_translation(translation), m_llc(llc) {
+SimpleO3Core::SimpleO3Core(int id, int ipc, int depth, size_t num_expected_insts, std::string trace_path, ITranslation* translation, SimpleO3LLC* llc, InstructionDispatcher* dispatcher):
+m_id(id), m_window(ipc, depth), m_trace(trace_path), m_num_expected_insts(num_expected_insts), m_translation(translation), m_llc(llc), m_dispatcher(dispatcher) {
   // Fetch the instructions and addresses for tick 0
   auto inst = m_trace.get_next_inst();
   m_num_bubbles = inst.bubble_count;
   m_load_addr = inst.load_addr;
   m_writeback_addr = inst.store_addr;
+  m_cud_pending = inst.is_cud;
+  m_cud_inst = inst.cud_inst;
 }
 
 void SimpleO3Core::tick() {
   m_clk++;
+  // if(m_trace.m_trace_length != m_num_expected_insts) {
+  //   throw std::runtime_error("Expected instruction num and trace length mismatch!");
+  // }
 
   s_insts_retired += m_window.retire();
   if (!reached_expected_num_insts) {
@@ -121,6 +136,10 @@ void SimpleO3Core::tick() {
       s_cycles_recorded = m_clk;
     }
   }
+
+  // if(m_trace.m_trace_length < m_trace.m_curr_trace_idx) {
+  //   return;
+  // }
 
   // First, issue the non-memory instructions
   int num_inserted_insts = 0;
@@ -134,6 +153,22 @@ void SimpleO3Core::tick() {
     m_window.insert(true, -1);
     num_inserted_insts++;
     m_num_bubbles--;
+  }
+
+  // CuD instruction interface
+  if (m_cud_pending & !m_cud_done) {
+    Request cud_request(m_cud_inst, Request::Type::CuD);
+    if (cud_request.cud_inst == 0x0000FFFF) {
+      m_cud_done = true;
+      return;
+    }
+    if(m_dispatcher->send_cud(m_clk, cud_request)) {
+      s_cud_insts_retired++;
+    }
+    else {
+      printf("send_cud to inst_dispatcher failed\n");
+      return;
+    }
   }
 
   // Second, try to send the load to the LLC
@@ -178,7 +213,9 @@ void SimpleO3Core::tick() {
   auto inst = m_trace.get_next_inst();
   m_num_bubbles = inst.bubble_count;
   m_load_addr = inst.load_addr;
-  m_writeback_addr = inst.store_addr;      
+  m_writeback_addr = inst.store_addr;
+  m_cud_pending = inst.is_cud;
+  m_cud_inst = inst.cud_inst;
 }
 
 void SimpleO3Core::receive(Request& req) {

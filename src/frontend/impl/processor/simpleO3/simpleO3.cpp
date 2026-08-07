@@ -5,7 +5,7 @@
 #include "translation/translation.h"
 #include "frontend/impl/processor/simpleO3/core.h"
 #include "frontend/impl/processor/simpleO3/llc.h"
-
+#include "frontend/impl/processor/simpleO3/inst_dispatcher.h"
 
 namespace Ramulator {
 
@@ -18,6 +18,7 @@ class SimpleO3 final : public IFrontEnd, public Implementation {
     int m_num_cores = -1;
     std::vector<SimpleO3Core*> m_cores;
     SimpleO3LLC* m_llc;
+    InstructionDispatcher* m_dispatcher;
 
     size_t m_num_expected_insts = 0;
 
@@ -27,7 +28,8 @@ class SimpleO3 final : public IFrontEnd, public Implementation {
   public:
     void init() override {
       m_clock_ratio = param<uint>("clock_ratio").required();
-      
+      m_logger = Logging::create_logger("SimpleO3");
+
       // Core params
       std::vector<std::string> trace_list = param<std::vector<std::string>>("traces").desc("A list of traces.").required();
       m_num_cores = trace_list.size();
@@ -50,17 +52,35 @@ class SimpleO3 final : public IFrontEnd, public Implementation {
 
       // Create the LLC
       m_llc = new SimpleO3LLC(llc_latency, llc_capacity_per_core * m_num_cores, llc_linesize_bytes, llc_associativity, llc_num_mshr_per_core * m_num_cores);
-      // m_llc->deserialize(serialization_filename);
-      // m_llc->serialize(serialization_filename);
+
+      // Instruction dispatcher for switching CuD & normal
+      std::string inst_dispatch_policy = param<std::string>("CuDSchedulingPolicy").default_val("CuDPriority");
+
+      CuDSchedulingPolicy scheduling_policy;
+        if(inst_dispatch_policy == "CuDPriority")              scheduling_policy = CuDSchedulingPolicy::CuDPriority;
+        else if(inst_dispatch_policy == "RoundRobinBank")      scheduling_policy = CuDSchedulingPolicy::RoundRobinBank;
+        else if(inst_dispatch_policy == "RoundRobinBankGroup") scheduling_policy = CuDSchedulingPolicy::RoundRobinBankGroup;
+        else if(inst_dispatch_policy == "RoundRobinRank")      scheduling_policy = CuDSchedulingPolicy::RoundRobinRank;
+        else{
+          throw ConfigurationError("Unknown CuD Scheduling Policy Error");
+        }
+        m_logger->info("Insturciton dispatcher policy set to : {}", inst_dispatch_policy);
+
+      m_dispatcher = new InstructionDispatcher(
+        nullptr,
+        scheduling_policy
+      );
+
+      m_llc->connect_dispatcher(m_dispatcher);
 
       // Create the cores
       for (int id = 0; id < m_num_cores; id++) {
-        SimpleO3Core* core = new SimpleO3Core(id, ipc, depth, m_num_expected_insts, trace_list[id], m_translation, m_llc);
+        // SimpleO3Core* core = new SimpleO3Core(id, ipc, depth, m_num_expected_insts, trace_list[id], m_translation, m_llc);
+        SimpleO3Core* core = new SimpleO3Core(id, ipc, depth, m_num_expected_insts, trace_list[id], m_translation, m_llc, m_dispatcher);
         core->m_callback = [this](Request& req){return this->receive(req);} ;
         m_cores.push_back(core);
       }
 
-      m_logger = Logging::create_logger("SimpleO3");
 
       // Register the stats
       register_stat(m_num_expected_insts).name("num_expected_insts");
@@ -86,6 +106,9 @@ class SimpleO3 final : public IFrontEnd, public Implementation {
       }
 
       m_llc->tick();
+      m_dispatcher->tick();
+      // m_dispatcher->PrintProfile(m_clk);
+
       for (auto core : m_cores) {
         core->tick();
       }
@@ -112,8 +135,14 @@ class SimpleO3 final : public IFrontEnd, public Implementation {
       return true;
     }
 
+    void finalize() override {
+      m_dispatcher->PrintProfile(m_clk);
+      IFrontEnd::finalize();
+    }
+
     void connect_memory_system(IMemorySystem* memory_system) override {
       m_llc->connect_memory_system(memory_system);
+      m_dispatcher->connect_memory_system(memory_system);
     };
 
     int get_num_cores() override {

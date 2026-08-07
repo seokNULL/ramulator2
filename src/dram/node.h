@@ -86,6 +86,8 @@ struct DRAMNodeBase {
           }
         }
       }
+      //SYKIM
+      // PrintChildNodes();
     };
 
     void update_states(int command, const AddrVec_t& addr_vec, Clk_t clk) {
@@ -156,7 +158,9 @@ struct DRAMNodeBase {
       // Update history
       if (m_cmd_history[command].size()) {
         m_cmd_history[command].pop_back();
-        m_cmd_history[command].push_front(clk); 
+        m_cmd_history[command].push_front(clk);
+
+        // PrintCmdHistory(m_cmd_history);
       }
 
       for (const auto& t : m_spec->m_timing_cons[m_level][command]) {
@@ -262,6 +266,38 @@ struct DRAMNodeBase {
       // recursively check for row hits at my child
       return m_child_nodes[child_id]->check_node_open(command, addr_vec, m_clk);
     }
+//SYKIM
+    void PrintCmdHistory(const std::vector<std::deque<Clk_t>>& m_cmd_history)
+    {
+        for (size_t i = 0; i < m_cmd_history.size(); ++i){
+            std::cout << "m_cmd_history[" << i << "] : ";
+            for (size_t j = 0; j < m_cmd_history[i].size(); ++j){
+                std::cout << m_cmd_history[i][j];
+                if (j + 1 < m_cmd_history[i].size()) std::cout << ", ";
+            }
+            std::cout << std::endl;
+        }
+    }
+
+    void PrintChildNodes() const {
+      std::cout << "==== PrintChildNodes ====\n";
+      std::cout << "this node ptr      : " << this << "\n";
+      std::cout << "m_child_nodes.size : " << m_child_nodes.size() << "\n";
+      for (size_t i = 0; i < m_child_nodes.size(); ++i) {
+        NodeType* child = m_child_nodes[i];
+        std::cout << "  child object ID[" << i << "] : ";
+
+        std::cout << child;
+        std::cout << " , level = " << child->m_level;
+        std::cout << " , node_id = " << child->m_node_id;
+        std::cout << " , child_count = " << child->m_child_nodes.size();
+
+        std::cout << "\n";
+      }
+
+      std::cout << "=========================\n";
+    }
+
 };
 
 template<class T>

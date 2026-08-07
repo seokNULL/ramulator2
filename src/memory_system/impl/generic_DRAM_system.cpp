@@ -42,7 +42,7 @@ class GenericDRAMSystem final : public IMemorySystem, public Implementation {
       register_stat(m_clk).name("memory_system_cycles");
       register_stat(s_num_read_requests).name("total_num_read_requests");
       register_stat(s_num_write_requests).name("total_num_write_requests");
-      register_stat(s_num_other_requests).name("total_num_other_requests");
+      register_stat(s_num_other_requests).name("total_num_CuD_requests");
     };
 
     void setup(IFrontEnd* frontend, IMemorySystem* memory_system) override { }

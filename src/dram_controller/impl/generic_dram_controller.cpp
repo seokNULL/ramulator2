@@ -411,5 +411,5 @@ class GenericDRAMController final : public IDRAMController, public Implementatio
     }
 
 };
-  
+
 }   // namespace Ramulator

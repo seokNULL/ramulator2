@@ -1,0 +1,13 @@
+#!/bin/bash
+set -e
+
+mkdir build_dbg
+cd build_dbg
+
+cmake -DCMAKE_BUILD_TYPE=Debug ..
+make -j
+
+cp ./ramulator2 ../ramulator2
+
+cd ..
+echo "Release build complete: ./ramulator2"

@@ -1,0 +1,71 @@
+Frontend:
+  impl: SimpleO3
+  clock_ratio: 1
+  num_expected_insts: 200000
+  llc_capacity_per_core: 2MB
+  llc_num_mshr_per_core: 16
+  traces:
+      # - ./traces/cud_rowcopy/cud_rowcopy_8KB.trace
+      # - ./traces/cud_rowcopy/cud_rowcopy_32KB.trace
+      # - ./traces/cud_rowcopy/cud_rowcopy_128KB.trace
+      # - ./traces/cud_rowcopy/cud_rowcopy_512KB.trace
+      # - ./traces/cud_rowcopy/cud_rowcopy_2MB.trace
+      # - ./traces/cud_rowcopy/cud_rowcopy_8MB.trace
+      # - ./traces/cud_rowcopy/cud_rowcopy_8KB_nxn.trace
+      # - ./traces/cud_rowcopy/cud_rowcopy_32KB_nxn.trace
+      # - ./traces/cud_rowcopy/cud_rowcopy_128KB_nxn.trace
+      # - ./traces/cud_rowcopy/cud_rowcopy_512KB_nxn.trace
+      # - ./traces/cud_rowcopy/cud_rowcopy_2MB_nxn.trace
+      #  - ./traces/cud_add/cud_add_1bit.trace
+      # - ./traces/cud_add/cud_add_2bit.trace
+      # - ./traces/cud_add/cud_add_3bit.trace
+      # - ./traces/cud_add/cud_add_4bit.trace
+      # - ./traces/cud_add/cud_add_5bit.trace
+      # - ./traces/cud_add/cud_add_6bit.trace
+      # - ./traces/cud_add/cud_add_7bit.trace
+      # - ./traces/cud_add/cud_add_8bit.trace
+      # - ./traces/cud_add/cud_add_1bit_not_opt.trace
+
+      - ./traces/cud_mul/cud_mul_4bit.trace
+
+      # - ./traces/cud_extra/cud_maj3.trace
+      # - ./traces/cud_extra/cud_xor.trace
+
+  CuDSchedulingPolicy : CuDPriority
+  # CuDSchedulingPolicy : RoundRobinBank
+  # CuDSchedulingPolicy : RoundRobinBankGroup
+  # CuDSchedulingPolicy : RoundRobinRank
+
+  Translation:
+    impl: NoTranslation
+    max_addr: 2147483648
+
+MemorySystem:
+  impl: GenericDRAM
+  clock_ratio: 1
+
+  DRAM:
+    impl: DDR4
+    org:
+      preset: DDR4_16Gb_x8
+    timing:
+      preset: DDR4_2400_CuD
+    voltage:
+      preset: Default
+    current:
+      preset: Default
+
+  Controller:
+    # impl: Generic
+    impl: CuD
+    Scheduler:
+      impl: FRFCFS
+    RefreshManager:
+      impl: AllBank
+    RowPolicy:
+      impl: OpenRowPolicy
+      cap: 4
+    plugins:
+
+  AddrMapper:
+    impl: RoBaRaCoCh

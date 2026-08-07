@@ -8,6 +8,7 @@
 #include "base/type.h"
 #include "base/request.h"
 #include "translation/translation.h"
+#include "frontend/impl/processor/simpleO3/inst_dispatcher.h"
 
 namespace Ramulator {
 
@@ -21,8 +22,11 @@ class SimpleO3Core : public Clocked<SimpleO3Core> {
       int bubble_count = 0;
       Addr_t load_addr = -1;
       Addr_t store_addr = -1;
+
+      bool is_cud = false;
+      CuD_inst_t cud_inst = -1;
     };
-  
+
     std::vector<Inst> m_trace;
     size_t m_trace_length = 0;
     size_t m_curr_trace_idx = 0;
@@ -92,7 +96,14 @@ class SimpleO3Core : public Clocked<SimpleO3Core> {
     Addr_t m_load_addr = -1;
     Addr_t m_writeback_addr = -1;
 
-    size_t m_num_expected_insts = 0;  
+    // CuD instruction state
+    bool   m_cud_pending = false;
+    CuD_inst_t m_cud_inst = 0;
+    bool   m_cud_done = false;
+
+    InstructionDispatcher* m_dispatcher;
+
+    size_t m_num_expected_insts = 0;
     Clk_t m_last_mem_cycle = 0; // The last cycle that a memory request departs from mc
 
   /************************************************
@@ -100,12 +111,14 @@ class SimpleO3Core : public Clocked<SimpleO3Core> {
    ***********************************************/
   public:
     bool reached_expected_num_insts = false;
-    size_t s_insts_retired = 0; 
-    size_t s_cycles_recorded = 0; 
-    Clk_t  s_mem_access_cycles = 0; 
+    size_t s_insts_retired = 0;
+    size_t s_cud_insts_retired = 0;
+    size_t s_cycles_recorded = 0;
+    Clk_t  s_mem_access_cycles = 0;
 
   public:
-    SimpleO3Core(int id, int ipc, int depth, size_t num_expected_insts, std::string trace_path, ITranslation* translation, SimpleO3LLC* llc);
+    // SimpleO3Core(int id, int ipc, int depth, size_t num_expected_insts, std::string trace_path, ITranslation* translation, SimpleO3LLC* llc);
+    SimpleO3Core(int id, int ipc, int depth, size_t num_expected_insts, std::string trace_path, ITranslation* translation, SimpleO3LLC* llc, InstructionDispatcher* dispatcher);
 
     /**
      * @brief   Ticks the core.

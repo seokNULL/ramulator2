@@ -1,6 +1,8 @@
 build/
+build_*/
 .vscode
 ext/
 ramulator2
 *.so
 autobuild.sh
+./dev/*.trace

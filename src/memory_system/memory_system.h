@@ -8,6 +8,9 @@
 
 #include "base/base.h"
 #include "frontend/frontend.h"
+#include "addr_mapper/addr_mapper.h"
+#include "dram/dram.h"
+
 
 namespace Ramulator {
 
@@ -70,6 +73,8 @@ class IMemorySystem : public TopLevel<IMemorySystem> {
     // virtual const SpecDef& get_supported_requests() = 0;
 
     virtual float get_tCK() { return -1.0f; };
+    virtual IAddrMapper* get_addr_mapper() {return nullptr;};
+    virtual IDRAM*       get_dram() {return nullptr;};
 };
 
 }        // namespace Ramulator

@@ -39,8 +39,26 @@ class AllBankRefresh : public IRefreshManager, public Implementation {
 
     void tick() {
       m_clk++;
+      // if (m_clk == m_next_refresh_cycle) {
+      //   m_next_refresh_cycle += m_nrefi;
+      //   for (int r = 0; r < m_num_ranks; r++) {
+      //     std::vector<int> addr_vec(m_dram_org_levels, -1);
+      //     addr_vec[0] = m_ctrl->m_channel_id;
+      //     addr_vec[1] = r;
+      //     Request req(addr_vec, m_ref_req_id);
 
-      if (m_clk == m_next_refresh_cycle) {
+      //     bool is_success = m_ctrl->priority_send(req);
+      //     if (!is_success) {
+      //       throw std::runtime_error("Failed to send refresh!");
+      //     }
+      //   }
+      // }
+
+      //Modify for CuD pending
+      if (m_clk >= m_next_refresh_cycle) {
+        if(m_ctrl->is_cud_active()){
+          return;
+        }
         m_next_refresh_cycle += m_nrefi;
         for (int r = 0; r < m_num_ranks; r++) {
           std::vector<int> addr_vec(m_dram_org_levels, -1);

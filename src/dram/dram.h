@@ -62,7 +62,7 @@ class IDRAM : public Clocked<IDRAM> {
    *                   Power
    ***********************************************/
   public:
-    bool m_drampower_enable = false;             // Whether to enable DRAM power model
+    bool m_drampower_enable = true;             // Whether to enable DRAM power model
 
     std::vector<PowerStats> m_power_stats;      // The power stats and counters PER channel PER rank (ch0rank0, ch0rank1... ch1rank0,...)
     SpecDef m_voltages;                         // The names of the voltage constraints
@@ -71,7 +71,7 @@ class IDRAM : public Clocked<IDRAM> {
     SpecLUT<double> m_current_vals{m_currents}; // The LUT of the values for each current constraints
     SpecDef m_cmds_counted;
 
-    bool m_power_debug = false;
+    bool m_power_debug = true;
 
     double s_total_background_energy = 0; // Total background energy consumed by the device
     double s_total_cmd_energy = 0;        // Total command energy consumed by the device

@@ -12,6 +12,7 @@
 #include "base/type.h"
 #include "base/request.h"
 #include "memory_system/memory_system.h"
+#include "frontend/impl/processor/simpleO3/inst_dispatcher.h"
 
 namespace Ramulator {
 
@@ -45,6 +46,7 @@ class SimpleO3LLC : public Clocked<SimpleO3LLC> {
     std::list<std::pair<Clk_t, Request>> m_hit_list;
 
     IMemorySystem* m_memory_system;
+    InstructionDispatcher* m_dispatcher;
 
     Logger_t m_logger;
 
@@ -74,7 +76,8 @@ class SimpleO3LLC : public Clocked<SimpleO3LLC> {
   public:
     SimpleO3LLC(int latency, int size_bytes, int linesize_bytes, int associativity, int num_mshrs);
     void connect_memory_system(IMemorySystem* memory_system) { m_memory_system = memory_system; };
-    
+    void connect_dispatcher(InstructionDispatcher* dispatcher){ m_dispatcher = dispatcher; };
+
     void tick();
     bool send(Request req);
     void receive(Request& req);

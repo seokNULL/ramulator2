@@ -9,16 +9,18 @@
 
 namespace Ramulator {
 
-struct Request { 
+struct Request {
   Addr_t    addr = -1;
   AddrVec_t addr_vec {};
+  CuD_inst_t cud_inst = -1;
 
   // Basic request id convention
   // 0 = Read, 1 = Write. The device spec defines all others
   struct Type {
     enum : int {
-      Read = 0, 
+      Read = 0,
       Write,
+      CuD,
     };
   };
 
@@ -41,12 +43,17 @@ struct Request {
   Request(Addr_t addr, int type);
   Request(AddrVec_t addr_vec, int type);
   Request(Addr_t addr, int type, int source_id, std::function<void(Request&)> callback);
+  Request(CuD_inst_t inst, int type);
+  Request() {};
+  // Request(CuD_inst_t inst, int type, int source_id, std::function<void(Request&)> callback);
+
 };
 
 
 struct ReqBuffer {
   std::list<Request> buffer;
-  size_t max_size = 32;
+  // size_t max_size = 32;
+  size_t max_size = 1024;
 
 
   using iterator = std::list<Request>::iterator;

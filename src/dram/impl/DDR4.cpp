@@ -25,6 +25,7 @@ class DDR4 : public IDRAM, public Implementation {
 
     inline static const std::map<std::string, std::vector<int>> timing_presets = {
       //   name       rate   nBL  nCL  nRCD  nRP   nRAS  nRC   nWR  nRTP nCWL nCCDS nCCDL nRRDS nRRDL nWTRS nWTRL nFAW  nRFC nREFI nCS,  tCK_ps
+   {"DDR4_2400_CuD",  {2400,   4,  16,  16,   16,   16,   16,   18,   9,   12,   4,    6,   -1,   -1,    3,    9,   -1,  -1,  -1,   2,    833} },
       {"DDR4_1600J",  {1600,   4,  10,  10,   10,   28,   38,   12,   6,   9,    4,    5,   -1,   -1,    2,    6,   -1,  -1,  -1,   2,    1250}},
       {"DDR4_1600K",  {1600,   4,  11,  11,   11,   28,   39,   12,   6,   9,    4,    5,   -1,   -1,    2,    6,   -1,  -1,  -1,   2,    1250}},
       {"DDR4_1600L",  {1600,   4,  12,  12,   12,   28,   40,   12,   6,   9,    4,    5,   -1,   -1,    2,    6,   -1,  -1,  -1,   2,    1250}},
@@ -179,6 +180,14 @@ class DDR4 : public IDRAM, public Implementation {
     FuncMatrix<RowopenFunc_t<Node>> m_rowopens;
     FuncMatrix<PowerFunc_t<Node>>   m_powers;
 
+    struct DramNodeSystems {
+      Node* channel = nullptr;
+
+      std::vector<Node*> ranks;
+      std::vector<Node*> bankgroups;
+      std::vector<Node*> banks;
+    };
+
   public:
     void tick() override {
       m_clk++;
@@ -212,9 +221,11 @@ class DDR4 : public IDRAM, public Implementation {
       m_channels[channel_id]->update_timing(command, addr_vec, m_clk);
       m_channels[channel_id]->update_powers(command, addr_vec, m_clk);
       m_channels[channel_id]->update_states(command, addr_vec, m_clk);
-      
+
       // Check if the command requires future action
       check_future_action(command, addr_vec);
+      //SYKIM
+      // ProfileDramNodes(command, addr_vec, channel_id);
     };
 
     void check_future_action(int command, const AddrVec_t& addr_vec) {
@@ -478,13 +489,16 @@ class DDR4 : public IDRAM, public Implementation {
           /// RAS <-> RAS
           {.level = "bankgroup", .preceding = {"ACT"}, .following = {"ACT"}, .latency = V("nRRDL")},  
 
-          /*** Bank ***/ 
-          {.level = "bank", .preceding = {"ACT"}, .following = {"ACT"}, .latency = V("nRC")},  
-          {.level = "bank", .preceding = {"ACT"}, .following = {"RD", "RDA", "WR", "WRA"}, .latency = V("nRCD")},  
-          {.level = "bank", .preceding = {"ACT"}, .following = {"PRE"}, .latency = V("nRAS")},  
-          {.level = "bank", .preceding = {"PRE"}, .following = {"ACT"}, .latency = V("nRP")},  
-          {.level = "bank", .preceding = {"RD"},  .following = {"PRE"}, .latency = V("nRTP")},  
-          {.level = "bank", .preceding = {"WR"},  .following = {"PRE"}, .latency = V("nCWL") + V("nBL") + V("nWR")},  
+          /*** Bank ***/
+          {.level = "bank", .preceding = {"ACT"}, .following = {"ACT"}, .latency = V("nRC")},
+          {.level = "bank", .preceding = {"ACT"}, .following = {"PRE"}, .latency = V("nRAS")},
+          // {.level = "bank", .preceding = {"ACT"}, .following = {"ACT"}, .latency = V("nRCD")}, //Modify for CuD operations
+          // {.level = "bank", .preceding = {"ACT"}, .following = {"PRE"}, .latency = V("nRCD")},  //Modify for CuD operations
+
+          {.level = "bank", .preceding = {"ACT"}, .following = {"RD", "RDA", "WR", "WRA"}, .latency = V("nRCD")},
+          {.level = "bank", .preceding = {"PRE"}, .following = {"ACT"}, .latency = V("nRP")},
+          {.level = "bank", .preceding = {"RD"},  .following = {"PRE"}, .latency = V("nRTP")},
+          {.level = "bank", .preceding = {"WR"},  .following = {"PRE"}, .latency = V("nCWL") + V("nBL") + V("nWR")},
           {.level = "bank", .preceding = {"RDA"}, .following = {"ACT"}, .latency = V("nRTP") + V("nRP")},  
           {.level = "bank", .preceding = {"WRA"}, .following = {"ACT"}, .latency = V("nCWL") + V("nBL") + V("nWR") + V("nRP")},  
         }
@@ -537,8 +551,9 @@ class DDR4 : public IDRAM, public Implementation {
     }
 
     void set_powers() {
-      
-      m_drampower_enable = param<bool>("drampower_enable").default_val(false);
+
+      // m_drampower_enable = param<bool>("drampower_enable").default_val(false);
+      m_drampower_enable = param<bool>("drampower_enable").default_val(true);
 
       if (!m_drampower_enable)
         return;
@@ -564,6 +579,7 @@ class DDR4 : public IDRAM, public Implementation {
       }
 
       m_power_debug = param<bool>("power_debug").default_val(false);
+      // m_power_debug = param<bool>("power_debug").default_val(true);
 
       // TODO: Check for multichannel configs.
       int num_channels = m_organization.count[m_levels["channel"]];
@@ -670,7 +686,88 @@ class DDR4 : public IDRAM, public Implementation {
       s_total_background_energy += rank_stats.total_background_energy;
       s_total_cmd_energy += rank_stats.total_cmd_energy;
       s_total_energy += rank_stats.total_energy;
+
+      printf("[Command Energy Breakdown (nJ)]                             \n");
+      printf("    ACT Command Energy          : %-28.4f \n", act_cmd_energy);
+      printf("    PRE Command Energy          : %-28.4f \n", pre_cmd_energy);
+      printf("    RD  Command Energy          : %-28.4f \n", rd_cmd_energy);
+      printf("    WR  Command Energy          : %-28.4f \n", wr_cmd_energy);
+      printf("    REF Command Energy          : %-28.4f \n", ref_cmd_energy);
+      printf("    Single ACT Command Energy   : %-28.4f \n",
+          (VE("VDD") * (CE("IDD0") - CE("IDD3N")) + VE("VPP") * (CE("IPP0") - CE("IPP3N")))
+                                      * 1 * TS("nRAS") * tCK_ns / 1E3
+                                    );
     }
+
+    //SYKIM
+  void ProfileDramNodes(int command, AddrVec_t addr_vec, int channel_id) {
+    DramNodeSystems sys;
+
+    sys.channel = m_channels[channel_id];
+    for (auto rank : sys.channel->m_child_nodes) {
+      sys.ranks.push_back(rank);
+      for (auto bg : rank->m_child_nodes) {
+        sys.bankgroups.push_back(bg);
+        for (auto bank : bg->m_child_nodes) {
+          sys.banks.push_back(bank);
+        }
+      }
+    }
+
+    int ra_id = addr_vec[m_levels["rank"]];
+    int bg_id = addr_vec[m_levels["bankgroup"]];
+    int ba_id = addr_vec[m_levels["bank"]];
+      if(ba_id == -1) return; //REF case
+
+    if((bg_id == 0) & (ba_id == 0)){
+      Node* bank_t = sys.banks[bg_id * 4 + ba_id];
+      printf("======================= Bank Node Status ========================\n");
+      printf("Cmd Ready Clk (size=%zu): [", bank_t->m_cmd_ready_clk.size());
+      for (size_t i = 0; i < bank_t->m_cmd_ready_clk.size(); ++i) {
+          printf("%ld", bank_t->m_cmd_ready_clk[i]);
+          if (i < bank_t->m_cmd_ready_clk.size() - 1) printf(", ");
+      }
+      printf("]\n");
+      printf("Cmd History (vector size=%zu):\n", bank_t->m_cmd_history.size());
+      for (size_t i = 0; i < bank_t->m_cmd_history.size(); ++i) {
+          printf("  Cmd Type %zu (deque size=%zu): [", i, bank_t->m_cmd_history[i].size());
+          const auto& dq = bank_t->m_cmd_history[i];
+          for (auto it = dq.begin(); it != dq.end(); ++it) {
+              printf("%ld", *it);
+              if (std::next(it) != dq.end()) printf(", ");
+          }
+          printf("]\n");
+      }
+      printf("Row State (map size=%zu): {", bank_t->m_row_state.size());
+      printf("Row ID=%d, State=%d", bank_t->m_row_state[0], bank_t->m_row_state[1]);
+      printf("}\n");
+      printf("==========================================\n");
+
+
+      Node* bankgroup_t = sys.bankgroups[bg_id];
+      printf("======================= BankGroup Node Status ========================\n");
+      printf("Cmd Ready Clk (size=%zu): [", bankgroup_t->m_cmd_ready_clk.size());
+      for (size_t i = 0; i < bankgroup_t->m_cmd_ready_clk.size(); ++i) {
+          printf("%ld", bankgroup_t->m_cmd_ready_clk[i]);
+          if (i < bankgroup_t->m_cmd_ready_clk.size() - 1) printf(", ");
+      }
+      printf("]\n");
+      printf("Cmd History (vector size=%zu):\n", bankgroup_t->m_cmd_history.size());
+      for (size_t i = 0; i < bankgroup_t->m_cmd_history.size(); ++i) {
+          printf("  Cmd Type %zu (deque size=%zu): [", i, bankgroup_t->m_cmd_history[i].size());
+          const auto& dq = bankgroup_t->m_cmd_history[i];
+          for (auto it = dq.begin(); it != dq.end(); ++it) {
+              printf("%ld", *it);
+              if (std::next(it) != dq.end()) printf(", ");
+          }
+          printf("]\n");
+      }
+      printf("Row State (map size=%zu): {", bankgroup_t->m_row_state.size());
+      printf("Row ID=%d, State=%d\n", bankgroup_t->m_row_state[0], bankgroup_t->m_row_state[1]);
+      printf("}\n");
+      printf("==========================================\n");
+    }
+  }
 };
 
 

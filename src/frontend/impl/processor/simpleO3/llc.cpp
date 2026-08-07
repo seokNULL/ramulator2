@@ -22,10 +22,25 @@ void SimpleO3LLC::tick() {
 
   // Send miss requests to the memory system when LLC latency is met
   // TODO: Optimization by assuming in-order issue?
-  auto it = m_miss_list.begin(); 
+  // auto it = m_miss_list.begin();
+  // while (it != m_miss_list.end()) {
+  //   if (m_clk >= it->first) {
+  //     if (!m_memory_system->send(it->second)) {
+  //       it++;
+  //     }
+  //     else {
+  //       it = m_miss_list.erase(it);
+  //     }
+  //   } else {
+  //     it++;
+  //   }
+  // }
+  auto it = m_miss_list.begin();
   while (it != m_miss_list.end()) {
     if (m_clk >= it->first) {
-      if (!m_memory_system->send(it->second)) {
+      bool sent  = m_dispatcher ? m_dispatcher->send_normal(it->first, it->second) :
+                                  m_memory_system->send(it->second);
+      if (!sent) {
         it++;
       }
       else {
@@ -35,6 +50,8 @@ void SimpleO3LLC::tick() {
       it++;
     }
   }
+
+
 
   // call hit request callback when LLC latency is met
   it = m_hit_list.begin();

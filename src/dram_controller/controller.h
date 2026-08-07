@@ -46,10 +46,11 @@ class IDRAMController : public Clocked<IDRAMController> {
 
     /**
      * @brief       Ticks the memory controller.
-     * 
+     *
      */
     virtual void tick() = 0;
-   
+
+    virtual bool is_cud_active() {return false;}
 };
 
 }       // namespace Ramulator
