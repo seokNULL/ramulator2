@@ -539,40 +539,40 @@ class CuDDRAMController final : public IDRAMController, public Implementation {
     }
 
     void MangeCuDInst(Request& req) {
-        const int ACT = m_dram->m_commands("ACT");
-        const int PRE = m_dram->m_commands("PRE");
+        const int CACT = m_dram->m_commands("CACT");
+        const int PRE  = m_dram->m_commands("PRE");
         const CuDInstDecoded d = CuDAddrDecoder::decode(req.cud_inst);
         const AddrVec_t& av   = req.addr_vec;
 
         switch (d.opcode) {
             case CuDOpcode::RowCopySrc:
-                m_cud_cmd_queue.push({PRE, av});
-                m_cud_cmd_queue.push({ACT, av});
+                m_cud_cmd_queue.push({PRE,  av});
+                m_cud_cmd_queue.push({CACT, av});
                 s_cud_rowcopy_src_count++;
                 s_cud_act_count_rowcopy++;
                 break;
             case CuDOpcode::RowCopyDst:
                 if (!d.is_last) {
-                    m_cud_cmd_queue.push({ACT, av});
+                    m_cud_cmd_queue.push({CACT, av});
                     s_cud_act_count_rowcopy++;
                 } else {
-                    m_cud_cmd_queue.push({ACT, av});
-                    m_cud_cmd_queue.push({PRE, av});
+                    m_cud_cmd_queue.push({CACT, av});
+                    m_cud_cmd_queue.push({PRE,  av});
                     s_cud_act_count_rowcopy++;
                 }
                 s_cud_rowcopy_dst_count++;
                 break;
             case CuDOpcode::Majority3:
-                m_cud_cmd_queue.push({PRE, av});
-                m_cud_cmd_queue.push({ACT, av});
-                m_cud_cmd_queue.push({PRE, av});
+                m_cud_cmd_queue.push({PRE,  av});
+                m_cud_cmd_queue.push({CACT, av});
+                m_cud_cmd_queue.push({PRE,  av});
                 s_cud_majority3_count++;
                 s_cud_act_count_maj3++;
                 break;
             case CuDOpcode::Majority5:
-                m_cud_cmd_queue.push({PRE, av});
-                m_cud_cmd_queue.push({ACT, av});
-                m_cud_cmd_queue.push({PRE, av});
+                m_cud_cmd_queue.push({PRE,  av});
+                m_cud_cmd_queue.push({CACT, av});
+                m_cud_cmd_queue.push({PRE,  av});
                 s_cud_majority5_count++;
                 s_cud_act_count_maj5++;
                 break;
@@ -682,6 +682,7 @@ class CuDDRAMController final : public IDRAMController, public Implementation {
         case 6: return "WRA";
         case 7: return "REFAB";
         case 8: return "REFAB_END";
+        case 9: return "CACT";
         default: return "UNKNOWN";
     }
   }

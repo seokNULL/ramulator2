@@ -76,10 +76,11 @@ class DDR4 : public IDRAM, public Implementation {
    *             Requests & Commands
    ***********************************************/
     inline static constexpr ImplDef m_commands = {
-      "ACT", 
+      "ACT",
       "PRE", "PREA",
       "RD",  "WR",  "RDA",  "WRA",
-      "REFab", "REFab_end"
+      "REFab", "REFab_end",
+      "CACT"   // CuD ACT: same row-open behavior as ACT but uses nRCD for ACT->ACT and ACT->PRE timing
     };
 
     inline static const ImplLUT m_command_scopes = LUT (
@@ -88,6 +89,7 @@ class DDR4 : public IDRAM, public Implementation {
         {"PRE",   "bank"},   {"PREA",   "rank"},
         {"RD",    "column"}, {"WR",     "column"}, {"RDA",   "column"}, {"WRA",   "column"},
         {"REFab", "rank"},  {"REFab_end", "rank"},
+        {"CACT",  "row"},
       }
     );
 
@@ -103,6 +105,7 @@ class DDR4 : public IDRAM, public Implementation {
         {"WRA",       {false,  true,    true,    false}},
         {"REFab",     {false,  false,   false,   true }},
         {"REFab_end", {false,  true,    false,   false}},
+        {"CACT",      {true,   false,   false,   false}},
       }
     );
 
@@ -470,16 +473,20 @@ class DDR4 : public IDRAM, public Implementation {
           {.level = "rank", .preceding = {"RD"}, .following = {"PREA"}, .latency = V("nRTP")},
           {.level = "rank", .preceding = {"WR"}, .following = {"PREA"}, .latency = V("nCWL") + V("nBL") + V("nWR")},          
           /// RAS <-> RAS
-          {.level = "rank", .preceding = {"ACT"}, .following = {"ACT"}, .latency = V("nRRDS")},          
-          {.level = "rank", .preceding = {"ACT"}, .following = {"ACT"}, .latency = V("nFAW"), .window = 4},          
-          {.level = "rank", .preceding = {"ACT"}, .following = {"PREA"}, .latency = V("nRAS")},          
-          {.level = "rank", .preceding = {"PREA"}, .following = {"ACT"}, .latency = V("nRP")},          
+          {.level = "rank", .preceding = {"ACT"},  .following = {"ACT", "CACT"}, .latency = V("nRRDS")},
+          {.level = "rank", .preceding = {"CACT"}, .following = {"ACT", "CACT"}, .latency = V("nRRDS")},
+          {.level = "rank", .preceding = {"ACT"},  .following = {"ACT"}, .latency = V("nFAW"), .window = 4},
+          {.level = "rank", .preceding = {"CACT"}, .following = {"CACT"}, .latency = V("nFAW"), .window = 4},
+          {.level = "rank", .preceding = {"ACT"},  .following = {"PREA"}, .latency = V("nRAS")},
+          {.level = "rank", .preceding = {"CACT"}, .following = {"PREA"}, .latency = V("nRCD")},
+          {.level = "rank", .preceding = {"PREA"}, .following = {"ACT", "CACT"}, .latency = V("nRP")},
           /// RAS <-> REF
-          {.level = "rank", .preceding = {"ACT"}, .following = {"REFab"}, .latency = V("nRC")},          
-          {.level = "rank", .preceding = {"PRE", "PREA"}, .following = {"REFab"}, .latency = V("nRP")},          
-          {.level = "rank", .preceding = {"RDA"}, .following = {"REFab"}, .latency = V("nRP") + V("nRTP")},          
-          {.level = "rank", .preceding = {"WRA"}, .following = {"REFab"}, .latency = V("nCWL") + V("nBL") + V("nWR") + V("nRP")},          
-          {.level = "rank", .preceding = {"REFab"}, .following = {"ACT", "PREA"}, .latency = V("nRFC")},          
+          {.level = "rank", .preceding = {"ACT"},  .following = {"REFab"}, .latency = V("nRC")},
+          {.level = "rank", .preceding = {"CACT"}, .following = {"REFab"}, .latency = V("nRCD")},
+          {.level = "rank", .preceding = {"PRE", "PREA"}, .following = {"REFab"}, .latency = V("nRP")},
+          {.level = "rank", .preceding = {"RDA"}, .following = {"REFab"}, .latency = V("nRP") + V("nRTP")},
+          {.level = "rank", .preceding = {"WRA"}, .following = {"REFab"}, .latency = V("nCWL") + V("nBL") + V("nWR") + V("nRP")},
+          {.level = "rank", .preceding = {"REFab"}, .following = {"ACT", "CACT", "PREA"}, .latency = V("nRFC")},
 
           /*** Same Bank Group ***/ 
           /// CAS <-> CAS
@@ -487,16 +494,19 @@ class DDR4 : public IDRAM, public Implementation {
           {.level = "bankgroup", .preceding = {"WR", "WRA"}, .following = {"WR", "WRA"}, .latency = V("nCCDL")},          
           {.level = "bankgroup", .preceding = {"WR", "WRA"}, .following = {"RD", "RDA"}, .latency = V("nCWL") + V("nBL") + V("nWTRL")},
           /// RAS <-> RAS
-          {.level = "bankgroup", .preceding = {"ACT"}, .following = {"ACT"}, .latency = V("nRRDL")},  
+          {.level = "bankgroup", .preceding = {"ACT"},  .following = {"ACT", "CACT"}, .latency = V("nRRDL")},
+          {.level = "bankgroup", .preceding = {"CACT"}, .following = {"ACT", "CACT"}, .latency = V("nRRDL")},
 
           /*** Bank ***/
-          {.level = "bank", .preceding = {"ACT"}, .following = {"ACT"}, .latency = V("nRC")},
-          {.level = "bank", .preceding = {"ACT"}, .following = {"PRE"}, .latency = V("nRAS")},
-          // {.level = "bank", .preceding = {"ACT"}, .following = {"ACT"}, .latency = V("nRCD")}, //Modify for CuD operations
-          // {.level = "bank", .preceding = {"ACT"}, .following = {"PRE"}, .latency = V("nRCD")},  //Modify for CuD operations
-
+          // Normal ACT timing
+          {.level = "bank", .preceding = {"ACT"}, .following = {"ACT", "CACT"}, .latency = V("nRC")},
+          {.level = "bank", .preceding = {"ACT"}, .following = {"PRE"},          .latency = V("nRAS")},
           {.level = "bank", .preceding = {"ACT"}, .following = {"RD", "RDA", "WR", "WRA"}, .latency = V("nRCD")},
-          {.level = "bank", .preceding = {"PRE"}, .following = {"ACT"}, .latency = V("nRP")},
+          {.level = "bank", .preceding = {"PRE"}, .following = {"ACT", "CACT"}, .latency = V("nRP")},
+          // CuD ACT (CACT) timing: uses nRCD instead of nRC/nRAS
+          {.level = "bank", .preceding = {"CACT"}, .following = {"ACT", "CACT"}, .latency = V("nRCD")},
+          {.level = "bank", .preceding = {"CACT"}, .following = {"PRE"},          .latency = V("nRCD")},
+          {.level = "bank", .preceding = {"CACT"}, .following = {"RD", "RDA", "WR", "WRA"}, .latency = V("nRCD")},
           {.level = "bank", .preceding = {"RD"},  .following = {"PRE"}, .latency = V("nRTP")},
           {.level = "bank", .preceding = {"WR"},  .following = {"PRE"}, .latency = V("nCWL") + V("nBL") + V("nWR")},
           {.level = "bank", .preceding = {"RDA"}, .following = {"ACT"}, .latency = V("nRTP") + V("nRP")},  
@@ -516,10 +526,11 @@ class DDR4 : public IDRAM, public Implementation {
       m_actions[m_levels["rank"]][m_commands["REFab_end"]] = Lambdas::Action::Rank::REFab_end<DDR4>;
 
       // Bank actions
-      m_actions[m_levels["bank"]][m_commands["ACT"]] = Lambdas::Action::Bank::ACT<DDR4>;
-      m_actions[m_levels["bank"]][m_commands["PRE"]] = Lambdas::Action::Bank::PRE<DDR4>;
-      m_actions[m_levels["bank"]][m_commands["RDA"]] = Lambdas::Action::Bank::PRE<DDR4>;
-      m_actions[m_levels["bank"]][m_commands["WRA"]] = Lambdas::Action::Bank::PRE<DDR4>;
+      m_actions[m_levels["bank"]][m_commands["ACT"]]  = Lambdas::Action::Bank::ACT<DDR4>;
+      m_actions[m_levels["bank"]][m_commands["CACT"]] = Lambdas::Action::Bank::ACT<DDR4>;
+      m_actions[m_levels["bank"]][m_commands["PRE"]]  = Lambdas::Action::Bank::PRE<DDR4>;
+      m_actions[m_levels["bank"]][m_commands["RDA"]]  = Lambdas::Action::Bank::PRE<DDR4>;
+      m_actions[m_levels["bank"]][m_commands["WRA"]]  = Lambdas::Action::Bank::PRE<DDR4>;
     };
 
     void set_preqs() {
@@ -529,10 +540,11 @@ class DDR4 : public IDRAM, public Implementation {
       m_preqs[m_levels["rank"]][m_commands["REFab"]] = Lambdas::Preq::Rank::RequireAllBanksClosed<DDR4>;
 
       // Bank actions
-      m_preqs[m_levels["bank"]][m_commands["RD"]] = Lambdas::Preq::Bank::RequireRowOpen<DDR4>;
-      m_preqs[m_levels["bank"]][m_commands["WR"]] = Lambdas::Preq::Bank::RequireRowOpen<DDR4>;
-      m_preqs[m_levels["bank"]][m_commands["ACT"]] = Lambdas::Preq::Bank::RequireRowOpen<DDR4>;
-      m_preqs[m_levels["bank"]][m_commands["PRE"]] = Lambdas::Preq::Bank::RequireBankClosed<DDR4>;
+      m_preqs[m_levels["bank"]][m_commands["RD"]]   = Lambdas::Preq::Bank::RequireRowOpen<DDR4>;
+      m_preqs[m_levels["bank"]][m_commands["WR"]]   = Lambdas::Preq::Bank::RequireRowOpen<DDR4>;
+      m_preqs[m_levels["bank"]][m_commands["ACT"]]  = Lambdas::Preq::Bank::RequireRowOpen<DDR4>;
+      m_preqs[m_levels["bank"]][m_commands["CACT"]] = Lambdas::Preq::Bank::RequireRowOpen<DDR4>;
+      m_preqs[m_levels["bank"]][m_commands["PRE"]]  = Lambdas::Preq::Bank::RequireBankClosed<DDR4>;
     };
 
     void set_rowhits() {
@@ -594,12 +606,14 @@ class DDR4 : public IDRAM, public Implementation {
 
       m_powers.resize(m_levels.size(), std::vector<PowerFunc_t<Node>>(m_commands.size()));
 
-      m_powers[m_levels["bank"]][m_commands["ACT"]] = Lambdas::Power::Bank::ACT<DDR4>;
-      m_powers[m_levels["bank"]][m_commands["PRE"]] = Lambdas::Power::Bank::PRE<DDR4>;
-      m_powers[m_levels["bank"]][m_commands["RD"]]  = Lambdas::Power::Bank::RD<DDR4>;
-      m_powers[m_levels["bank"]][m_commands["WR"]]  = Lambdas::Power::Bank::WR<DDR4>;
+      m_powers[m_levels["bank"]][m_commands["ACT"]]  = Lambdas::Power::Bank::ACT<DDR4>;
+      m_powers[m_levels["bank"]][m_commands["CACT"]] = Lambdas::Power::Bank::ACT<DDR4>;
+      m_powers[m_levels["bank"]][m_commands["PRE"]]  = Lambdas::Power::Bank::PRE<DDR4>;
+      m_powers[m_levels["bank"]][m_commands["RD"]]   = Lambdas::Power::Bank::RD<DDR4>;
+      m_powers[m_levels["bank"]][m_commands["WR"]]   = Lambdas::Power::Bank::WR<DDR4>;
 
-      m_powers[m_levels["rank"]][m_commands["ACT"]] = Lambdas::Power::Rank::ACT<DDR4>;
+      m_powers[m_levels["rank"]][m_commands["ACT"]]  = Lambdas::Power::Rank::ACT<DDR4>;
+      m_powers[m_levels["rank"]][m_commands["CACT"]] = Lambdas::Power::Rank::ACT<DDR4>;
       m_powers[m_levels["rank"]][m_commands["PRE"]] = Lambdas::Power::Rank::PRE<DDR4>;
       m_powers[m_levels["rank"]][m_commands["PREA"]] = Lambdas::Power::Rank::PREA<DDR4>;
       m_powers[m_levels["rank"]][m_commands["REFab"]] = Lambdas::Power::Rank::REFab<DDR4>;
