@@ -49,7 +49,7 @@ MemorySystem:
     org:
       preset: DDR4_16Gb_x8
     timing:
-      preset: DDR4_2400_CuD
+      preset: DDR4_2400R
     voltage:
       preset: Default
     current:
