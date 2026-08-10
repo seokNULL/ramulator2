@@ -25,24 +25,36 @@
 //       .nrfc       = "nRFC",
 //       .nrrd_s     = "nRRDS",
 //       .nrrd_l     = "nRRDL",
-//       .rank_level = "rank",          // "rank" or "pseudochannel"
+//       .rank_level = "rank",          // "rank" or "pseudochannel" or "channel"
 //       .nfaw       = "nFAW",          // omit or leave "" to skip FAW constraint
+//       .act_cmd    = "ACT",           // override to "ACT-1" for LPDDR5
 //   });
 //   // set_actions():
 //   CuDSupport::add_actions<MyDRAM>(m_actions);
 //   // set_preqs():
 //   CuDSupport::add_preqs<MyDRAM>(m_preqs);
 //
-// ── Per-DRAM nrcd mapping ────────────────────────────────────────────────────
-//   DDR4, DDR5 : nrcd = "nRCD"
-//   HBM3       : nrcd = "nRCDRD"   (HBM3 splits nRCD into read/write)
-//   GDDR6      : nrcd = "nRCDRD"
-//   LPDDR5     : nrcd = "nRCD"
+// ── Per-DRAM parameter mapping ───────────────────────────────────────────────
+//   DDR4  : nrcd="nRCD",   nrp="nRP",    nrc="nRC",  nrfc="nRFC",
+//            nrrd_s="nRRDS", nrrd_l="nRRDL", rank_level="rank",          nfaw="nFAW"
+//   HBM3  : nrcd="nRCDRD", nrp="nRP",    nrc="nRC",  nrfc="nRFC",
+//            nrrd_s="nRRDS", nrrd_l="nRRDL", rank_level="pseudochannel", nfaw="nFAW"
+//   GDDR6 : nrcd="nRCDRD", nrp="nRP",    nrc="nRC",  nrfc="nRFC",
+//            nrrd_s="nRRDS", nrrd_l="nRRDL", rank_level="channel",       nfaw="nFAW"
+//   LPDDR5: nrcd="nRCD",   nrp="nRPpb",  nrc="nRC",  nrfc="nRFCab",
+//            nrrd_s="nRRD",  nrrd_l="nRRD",  rank_level="rank",          nfaw="nFAW",
+//            act_cmd="ACT-1"
 //
 // Note: DRAM types with device-specific channel-level row-command latency
 // (e.g., HBM3's 2-cycle ACT) must add those channel-level CACT entries
 // directly in their own populate_timingcons() call — the helper only covers
-// the universal rank/pseudochannel + bankgroup + bank levels.
+// the universal rank/pseudochannel/channel + bankgroup + bank levels.
+//
+// Note: LPDDR5 uses a 2-phase activation (ACT-1 / ACT-2). CACT replaces
+// both phases as a single row-opening command.  Use act_cmd="ACT-1" so that
+// the helper generates the correct ACT-1↔CACT rate constraints, and add a
+// custom preq in LPDDR5.cpp to handle the "Pre-Opened" intermediate state
+// (RequireBankClosed does not cover it).
 
 #pragma once
 
@@ -72,11 +84,14 @@ struct TimingConfig {
     // Long within-bankgroup RAS-to-RAS rate — CACT↔ACT within a bankgroup.
     std::string_view nrrd_l;
     // Hierarchy level that acts as "rank" for inter-bank constraints.
-    // Use "rank" for DDR4/DDR5, "pseudochannel" for HBM3.
+    // Use "rank" for DDR4/DDR5/LPDDR5, "pseudochannel" for HBM3, "channel" for GDDR6.
     std::string_view rank_level;
     // Optional: 4-activation window timing parameter name.
     // Leave empty ("") to skip the FAW constraint for CACT.
     std::string_view nfaw = "";
+    // Name of the ACT command used in timing constraints.
+    // Most DRAMs use "ACT". LPDDR5 uses "ACT-1" (first phase of 2-phase activation).
+    std::string_view act_cmd = "ACT";
 };
 
 // Add CACT timing constraints to dram->m_timing_cons.
@@ -93,38 +108,40 @@ void add_timing(DRAM_T* dram, SpecLUT<int>& tv, const TimingConfig& cfg) {
     int nrrds = tv(cfg.nrrd_s);
     int nrrdl = tv(cfg.nrrd_l);
 
+    std::string_view act = cfg.act_cmd;
+
     std::vector<TimingConsInitializer> entries = {
-        // ── rank / pseudochannel level ────────────────────────────────────
+        // ── rank / pseudochannel / channel level ──────────────────────────
         // ACT→CACT: same short-RRD rate as ACT→ACT
-        {.level = cfg.rank_level, .preceding = {"ACT"},   .following = {"CACT"},        .latency = nrrds},
+        {.level = cfg.rank_level, .preceding = {act},    .following = {"CACT"},       .latency = nrrds},
         // CACT→ACT/CACT: CuD operations at standard RRD rate
-        {.level = cfg.rank_level, .preceding = {"CACT"},  .following = {"ACT", "CACT"}, .latency = nrrds},
+        {.level = cfg.rank_level, .preceding = {"CACT"}, .following = {act, "CACT"},  .latency = nrrds},
         // CACT→PREA: relaxed — nRCD instead of nRAS
-        {.level = cfg.rank_level, .preceding = {"CACT"},  .following = {"PREA"},         .latency = nrcd},
+        {.level = cfg.rank_level, .preceding = {"CACT"}, .following = {"PREA"},        .latency = nrcd},
         // PREA→CACT: standard precharge penalty
-        {.level = cfg.rank_level, .preceding = {"PREA"},  .following = {"CACT"},         .latency = nrp},
+        {.level = cfg.rank_level, .preceding = {"PREA"}, .following = {"CACT"},        .latency = nrp},
         // CACT→REFab: relaxed — nRCD instead of nRC
-        {.level = cfg.rank_level, .preceding = {"CACT"},  .following = {"REFab"},        .latency = nrcd},
+        {.level = cfg.rank_level, .preceding = {"CACT"}, .following = {"REFab"},       .latency = nrcd},
         // REFab→CACT: same as REFab→ACT
-        {.level = cfg.rank_level, .preceding = {"REFab"}, .following = {"CACT"},         .latency = nrfc},
+        {.level = cfg.rank_level, .preceding = {"REFab"}, .following = {"CACT"},       .latency = nrfc},
 
         // ── bankgroup level ───────────────────────────────────────────────
         // ACT→CACT: long-RRD rate (within bankgroup)
-        {.level = "bankgroup",    .preceding = {"ACT"},   .following = {"CACT"},        .latency = nrrdl},
+        {.level = "bankgroup",    .preceding = {act},    .following = {"CACT"},       .latency = nrrdl},
         // CACT→ACT/CACT: long-RRD rate
-        {.level = "bankgroup",    .preceding = {"CACT"},  .following = {"ACT", "CACT"}, .latency = nrrdl},
+        {.level = "bankgroup",    .preceding = {"CACT"}, .following = {act, "CACT"},  .latency = nrrdl},
 
         // ── bank level ────────────────────────────────────────────────────
         // ACT→CACT: full row-cycle time (same as normal same-bank ACT→ACT)
-        {.level = "bank",         .preceding = {"ACT"},   .following = {"CACT"},                   .latency = nrc},
+        {.level = "bank",         .preceding = {act},    .following = {"CACT"},                .latency = nrc},
         // CACT→ACT/CACT: KEY RELAXATION — nRCD instead of nRC
-        {.level = "bank",         .preceding = {"CACT"},  .following = {"ACT", "CACT"},             .latency = nrcd},
+        {.level = "bank",         .preceding = {"CACT"}, .following = {act, "CACT"},           .latency = nrcd},
         // CACT→PRE: KEY RELAXATION — nRCD instead of nRAS
-        {.level = "bank",         .preceding = {"CACT"},  .following = {"PRE"},                     .latency = nrcd},
+        {.level = "bank",         .preceding = {"CACT"}, .following = {"PRE"},                 .latency = nrcd},
         // CACT→column: nRCD (standard row-to-column latency)
-        {.level = "bank",         .preceding = {"CACT"},  .following = {"RD","RDA","WR","WRA"},     .latency = nrcd},
+        {.level = "bank",         .preceding = {"CACT"}, .following = {"RD","RDA","WR","WRA"}, .latency = nrcd},
         // PRE→CACT: standard precharge penalty
-        {.level = "bank",         .preceding = {"PRE"},   .following = {"CACT"},                   .latency = nrp},
+        {.level = "bank",         .preceding = {"PRE"},  .following = {"CACT"},                .latency = nrp},
     };
 
     // Optional 4-activation window for CACT (mirrors the normal ACT FAW rule)
@@ -149,11 +166,16 @@ void add_actions(FuncMatrix<ActionFunc_t<typename DRAM_T::Node>>& m_actions) {
         Lambdas::Action::Bank::ACT<DRAM_T>;
 }
 
-// Require the bank row to be open before issuing CACT (same as normal ACT).
+// Require the bank to be closed before issuing CACT.
+// CACT is the row-opening command, so the bank must be closed (or refreshing).
+// If the bank is already open (a different CuD row), PRE is issued first.
+//
+// Note: LPDDR5 has an extra "Pre-Opened" intermediate state (after ACT-1).
+// add_preqs() does not handle it; add a custom preq in LPDDR5.cpp instead.
 template<typename DRAM_T>
 void add_preqs(FuncMatrix<PreqFunc_t<typename DRAM_T::Node>>& m_preqs) {
     m_preqs[DRAM_T::m_levels["bank"]][DRAM_T::m_commands["CACT"]] =
-        Lambdas::Preq::Bank::RequireRowOpen<DRAM_T>;
+        Lambdas::Preq::Bank::RequireBankClosed<DRAM_T>;
 }
 
 } // namespace CuDSupport

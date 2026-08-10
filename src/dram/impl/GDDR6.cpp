@@ -1,5 +1,6 @@
 #include "dram/dram.h"
 #include "dram/lambdas.h"
+#include "dram/cud_support.h"
 
 namespace Ramulator {
 
@@ -41,16 +42,17 @@ class GDDR6 : public IDRAM, public Implementation {
    *             Requests & Commands
    ***********************************************/
     inline static constexpr ImplDef m_commands = { //figure 3
-      "ACT", 
+      "ACT",
       "PREA", "PRE",
       "RD",  "WR",  "RDA",  "WRA",
       "REFab", "REFpb", "REFp2b",
+      "CACT",
     };
 
     inline static const ImplLUT m_command_scopes = LUT (
       m_commands, m_levels, {
         {"REFab", "channel"},  {"REFp2b",  "channel"},
-        {"ACT",   "row"},
+        {"ACT",   "row"},      {"CACT",    "row"},
         {"PREA", "bank"},   {"PRE",  "bank"},  {"REFpb", "bank"},
         {"RD",    "column"}, {"WR",   "column"},  {"RDA",  "column"}, {"WRA",   "column"},
       }
@@ -66,9 +68,10 @@ class GDDR6 : public IDRAM, public Implementation {
         {"WR",    {false,  false,   true,    false}},
         {"RDA",   {false,  true,    true,    false}},
         {"WRA",   {false,  true,    true,    false}},
-        {"REFab", {false,  false,   false,   true }}, //double check
+        {"REFab", {false,  false,   false,   true }},
         {"REFpb", {false,  false,   false,   true }},
         {"REFp2b",{false,  false,   false,   true }},
+        {"CACT",  {true,   false,   false,   false}},
       }
     );
 
@@ -129,6 +132,8 @@ class GDDR6 : public IDRAM, public Implementation {
 
 
   public:
+    int get_cact_cmd_id() const override { return m_commands("CACT"); }
+
     void tick() override {
       m_clk++;
     };
@@ -340,6 +345,7 @@ class GDDR6 : public IDRAM, public Implementation {
       // Populate the timing constraints
       #define V(timing) (m_timing_vals(timing))
       populate_timingcons(this, {
+          // ── NOTE: CACT (CuD-ACT) entries are added via CuDSupport::add_timing below ──
           /*** Channel ***/ 
           // CAS <-> CAS
           /// Data bus occupancy
@@ -418,32 +424,44 @@ class GDDR6 : public IDRAM, public Implementation {
       );
       #undef V
 
+      CuDSupport::add_timing<GDDR6>(this, m_timing_vals, {
+          .nrcd       = "nRCDRD",    // GDDR6 splits nRCD; use read version for CuD
+          .nrp        = "nRP",
+          .nrc        = "nRC",
+          .nrfc       = "nRFC",
+          .nrrd_s     = "nRRDS",
+          .nrrd_l     = "nRRDL",
+          .rank_level = "channel",   // GDDR6 has no rank level; channel is the top
+          .nfaw       = "nFAW",
+      });
     };
 
     void set_actions() {
       m_actions.resize(m_levels.size(), std::vector<ActionFunc_t<Node>>(m_commands.size()));
 
-      // Channel Actions 
-      m_actions[m_levels["channel"]][m_commands["PREA"]] = Lambdas::Action::Channel::PREab<GDDR6>; 
+      // Channel Actions
+      m_actions[m_levels["channel"]][m_commands["PREA"]] = Lambdas::Action::Channel::PREab<GDDR6>;
 
       // Bank actions
       m_actions[m_levels["bank"]][m_commands["ACT"]] = Lambdas::Action::Bank::ACT<GDDR6>;
       m_actions[m_levels["bank"]][m_commands["PRE"]] = Lambdas::Action::Bank::PRE<GDDR6>;
       m_actions[m_levels["bank"]][m_commands["RDA"]] = Lambdas::Action::Bank::PRE<GDDR6>;
       m_actions[m_levels["bank"]][m_commands["WRA"]] = Lambdas::Action::Bank::PRE<GDDR6>;
+      CuDSupport::add_actions<GDDR6>(m_actions);
     };
 
     void set_preqs() {
       m_preqs.resize(m_levels.size(), std::vector<PreqFunc_t<Node>>(m_commands.size()));
 
-      // Channel Actions 
-      m_preqs[m_levels["channel"]][m_commands["REFab"]] = Lambdas::Preq::Channel::RequireAllBanksClosed<GDDR6>; 
+      // Channel Actions
+      m_preqs[m_levels["channel"]][m_commands["REFab"]] = Lambdas::Preq::Channel::RequireAllBanksClosed<GDDR6>;
 
       // Bank actions
       m_preqs[m_levels["bank"]][m_commands["RD"]] = Lambdas::Preq::Bank::RequireRowOpen<GDDR6>;
       m_preqs[m_levels["bank"]][m_commands["WR"]] = Lambdas::Preq::Bank::RequireRowOpen<GDDR6>;
-      //m_preqs[m_levels["channel"]][m_commands["REFpb"]] = Lambdas::Preq::Bank::RequireAllBanksClosed<GDDR6>; // can RequireSameBanksClosed be used, or is RequireBankClosed needed?
-      //m_preqs[m_levels["channel"]][m_commands["REFp2b"]] = Lambdas::Preq::Bank::RequireAllBanksClosed<GDDR6>; 
+      //m_preqs[m_levels["channel"]][m_commands["REFpb"]] = Lambdas::Preq::Bank::RequireAllBanksClosed<GDDR6>;
+      //m_preqs[m_levels["channel"]][m_commands["REFp2b"]] = Lambdas::Preq::Bank::RequireAllBanksClosed<GDDR6>;
+      CuDSupport::add_preqs<GDDR6>(m_preqs);
     };
 
     void set_rowhits() {

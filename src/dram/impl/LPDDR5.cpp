@@ -1,5 +1,6 @@
 #include "dram/dram.h"
 #include "dram/lambdas.h"
+#include "dram/cud_support.h"
 
 namespace Ramulator {
 
@@ -42,11 +43,12 @@ class LPDDR5 : public IDRAM, public Implementation {
       "RD16",   "WR16",   "RD16A",   "WR16A",
       "REFab",  "REFpb",
       "RFMab",  "RFMpb",
+      "CACT",
     };
 
     inline static const ImplLUT m_command_scopes = LUT (
       m_commands, m_levels, {
-        {"ACT-1", "row"},    {"ACT-2",  "row"},
+        {"ACT-1", "row"},    {"ACT-2",  "row"},    {"CACT", "row"},
         {"PRE",   "bank"},   {"PREA",   "rank"},
         {"CASRD", "rank"},   {"CASWR",  "rank"},
         {"RD16",  "column"}, {"WR16",   "column"}, {"RD16A", "column"}, {"WR16A", "column"},
@@ -72,6 +74,7 @@ class LPDDR5 : public IDRAM, public Implementation {
         {"REFpb",  {false,  false,   false,   true }},
         {"RFMab",  {false,  false,   false,   true }},
         {"RFMpb",  {false,  false,   false,   true }},
+        {"CACT",   {true,   false,   false,   false}},
       }
     );
 
@@ -140,6 +143,8 @@ class LPDDR5 : public IDRAM, public Implementation {
 
 
   public:
+    int get_cact_cmd_id() const override { return m_commands("CACT"); }
+
     void tick() override {
       m_clk++;
     };
@@ -384,19 +389,32 @@ class LPDDR5 : public IDRAM, public Implementation {
           /// RAS <-> RAS
           {.level = "bankgroup", .preceding = {"ACT-1"}, .following = {"ACT-1"}, .latency = V("nRRD")},  
 
-          /*** Bank ***/ 
-          {.level = "bank", .preceding = {"ACT-1"}, .following = {"ACT-1"}, .latency = V("nRC")},  
-          {.level = "bank", .preceding = {"ACT-1"}, .following = {"RD16", "RD16A", "WR16", "WR16A"}, .latency = V("nRCD")},  
-          {.level = "bank", .preceding = {"ACT-1"}, .following = {"PRE"}, .latency = V("nRAS")},  
-          {.level = "bank", .preceding = {"PRE"}, .following = {"ACT-1"}, .latency = V("nRPpb")},  
-          {.level = "bank", .preceding = {"RD16"},  .following = {"PRE"}, .latency = V("nRTP")},  
-          {.level = "bank", .preceding = {"WR16"},  .following = {"PRE"}, .latency = V("nCWL") + V("nBL16") + V("nWR")},  
-          {.level = "bank", .preceding = {"RD16A"}, .following = {"ACT-1"}, .latency = V("nRTP") + V("nRPpb")},  
-          {.level = "bank", .preceding = {"WR16A"}, .following = {"ACT-1"}, .latency = V("nCWL") + V("nBL16") + V("nWR") + V("nRPpb")},  
+          /*** Bank ***/
+          {.level = "bank", .preceding = {"ACT-1"}, .following = {"ACT-1"}, .latency = V("nRC")},
+          {.level = "bank", .preceding = {"ACT-1"}, .following = {"RD16", "RD16A", "WR16", "WR16A"}, .latency = V("nRCD")},
+          {.level = "bank", .preceding = {"ACT-1"}, .following = {"PRE"}, .latency = V("nRAS")},
+          {.level = "bank", .preceding = {"PRE"}, .following = {"ACT-1"}, .latency = V("nRPpb")},
+          {.level = "bank", .preceding = {"RD16"},  .following = {"PRE"}, .latency = V("nRTP")},
+          {.level = "bank", .preceding = {"WR16"},  .following = {"PRE"}, .latency = V("nCWL") + V("nBL16") + V("nWR")},
+          {.level = "bank", .preceding = {"RD16A"}, .following = {"ACT-1"}, .latency = V("nRTP") + V("nRPpb")},
+          {.level = "bank", .preceding = {"WR16A"}, .following = {"ACT-1"}, .latency = V("nCWL") + V("nBL16") + V("nWR") + V("nRPpb")},
         }
       );
       #undef V
 
+      // CACT (CuD-ACT) timing: uses ACT-1 as the activation command for rate constraints.
+      // nrrd_s and nrrd_l both map to nRRD (LPDDR5 does not differentiate short/long).
+      CuDSupport::add_timing<LPDDR5>(this, m_timing_vals, {
+          .nrcd       = "nRCD",
+          .nrp        = "nRPpb",
+          .nrc        = "nRC",
+          .nrfc       = "nRFCab",
+          .nrrd_s     = "nRRD",
+          .nrrd_l     = "nRRD",
+          .rank_level = "rank",
+          .nfaw       = "nFAW",
+          .act_cmd    = "ACT-1",
+      });
     };
 
     void set_actions() {
@@ -425,6 +443,8 @@ class LPDDR5 : public IDRAM, public Implementation {
       m_actions[m_levels["bank"]][m_commands["PRE"]]   = Lambdas::Action::Bank::PRE<LPDDR5>;
       m_actions[m_levels["bank"]][m_commands["RD16A"]] = Lambdas::Action::Bank::PRE<LPDDR5>;
       m_actions[m_levels["bank"]][m_commands["WR16A"]] = Lambdas::Action::Bank::PRE<LPDDR5>;
+      // CACT opens the bank directly (bypasses the ACT-1 Pre-Opened intermediate state)
+      CuDSupport::add_actions<LPDDR5>(m_actions);
     };
 
     void set_preqs() {
@@ -453,6 +473,17 @@ class LPDDR5 : public IDRAM, public Implementation {
       };
       
       m_preqs[m_levels["rank"]][m_commands["RFMpb"]] = m_preqs[m_levels["rank"]][m_commands["REFpb"]];
+
+      // CACT preq: bank must be closed. Handles Pre-Opened state from 2-phase ACT.
+      // (RequireBankClosed from CuDSupport::add_preqs does not cover Pre-Opened.)
+      m_preqs[m_levels["bank"]][m_commands["CACT"]] = [] (Node* node, int cmd, const AddrVec_t& addr_vec, Clk_t clk) {
+        switch (node->m_state) {
+          case m_states["Closed"]:      return cmd;
+          case m_states["Pre-Opened"]:  return m_commands["PRE"];
+          case m_states["Opened"]:      return m_commands["PRE"];
+          default:                      return cmd;
+        }
+      };
 
       // Bank Preqs
       m_preqs[m_levels["bank"]][m_commands["RD16"]] = [] (Node* node, int cmd, const AddrVec_t& addr_vec, Clk_t clk) {
