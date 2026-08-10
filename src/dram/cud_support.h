@@ -92,6 +92,11 @@ struct TimingConfig {
     // Name of the ACT command used in timing constraints.
     // Most DRAMs use "ACT". LPDDR5 uses "ACT-1" (first phase of 2-phase activation).
     std::string_view act_cmd = "ACT";
+    // Column-access commands to constrain after CACT (CACT→col requires nRCD delay).
+    // Standard DDR names: {"RD","RDA","WR","WRA"}.
+    // LPDDR5 uses: {"RD16","WR16","RD16A","WR16A"}.
+    // GDDR6 uses:  {"RD","WR","RDA","WRA"} (same as default).
+    std::vector<std::string_view> col_cmds = {"RD", "RDA", "WR", "WRA"};
 };
 
 // Add CACT timing constraints to dram->m_timing_cons.
@@ -139,7 +144,7 @@ void add_timing(DRAM_T* dram, SpecLUT<int>& tv, const TimingConfig& cfg) {
         // CACT→PRE: KEY RELAXATION — nRCD instead of nRAS
         {.level = "bank",         .preceding = {"CACT"}, .following = {"PRE"},                 .latency = nrcd},
         // CACT→column: nRCD (standard row-to-column latency)
-        {.level = "bank",         .preceding = {"CACT"}, .following = {"RD","RDA","WR","WRA"}, .latency = nrcd},
+        {.level = "bank",         .preceding = {"CACT"}, .following = cfg.col_cmds,            .latency = nrcd},
         // PRE→CACT: standard precharge penalty
         {.level = "bank",         .preceding = {"PRE"},  .following = {"CACT"},                .latency = nrp},
     };

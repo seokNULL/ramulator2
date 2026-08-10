@@ -414,6 +414,7 @@ class LPDDR5 : public IDRAM, public Implementation {
           .rank_level = "rank",
           .nfaw       = "nFAW",
           .act_cmd    = "ACT-1",
+          .col_cmds   = {"RD16", "WR16", "RD16A", "WR16A"},
       });
     };
 

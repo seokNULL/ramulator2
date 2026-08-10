@@ -1,0 +1,51 @@
+Frontend:
+  impl: SimpleO3
+  clock_ratio: 1
+  num_expected_insts: 200000
+  llc_capacity_per_core: 2MB
+  llc_num_mshr_per_core: 16
+  traces:
+      # - ./traces/cud_rowcopy/cud_rowcopy_8KB.trace
+      # - ./traces/cud_rowcopy/cud_rowcopy_32KB.trace
+      # - ./traces/cud_rowcopy/cud_rowcopy_128KB.trace
+      # - ./traces/cud_rowcopy/cud_rowcopy_512KB.trace
+      # - ./traces/cud_rowcopy/cud_rowcopy_2MB.trace
+      # - ./traces/cud_rowcopy/cud_rowcopy_8MB.trace
+      #  - ./traces/cud_add/cud_add_4bit.trace
+      - ./traces/cud_mul/cud_mul_4bit.trace
+      # - ./traces/cud_extra/cud_maj3.trace
+
+  CuDSchedulingPolicy : CuDPriority
+  # CuDSchedulingPolicy : RoundRobinBank
+  # CuDSchedulingPolicy : RoundRobinBankGroup
+  # CuDSchedulingPolicy : RoundRobinRank
+
+  Translation:
+    impl: NoTranslation
+    max_addr: 2147483648
+
+MemorySystem:
+  impl: GenericDRAM
+  clock_ratio: 1
+
+  DRAM:
+    impl: LPDDR5
+    org:
+      preset: LPDDR5_8Gb_x16
+    timing:
+      preset: LPDDR5_6400
+    # Note: LPDDR5 does not define voltage/current presets; power stats are disabled.
+
+  Controller:
+    impl: CuD
+    Scheduler:
+      impl: FRFCFS
+    RefreshManager:
+      impl: AllBank
+    RowPolicy:
+      impl: OpenRowPolicy
+      cap: 4
+    plugins:
+
+  AddrMapper:
+    impl: RoBaRaCoCh
